@@ -9,6 +9,9 @@ const bot = new TelegramBot(token, { polling: true });
 // Объект для хранения планов (ключ - ID чата, значение - массив планов)
 const plans = {};
 
+// Объект для хранения состояний пользователей (какой запрос они ожидают)
+const userStates = {};
+
 // Функция для добавления плана
 function addPlan(chatId, time, task) {
     if (!plans[chatId]) {
@@ -31,10 +34,31 @@ function sendReminder(chatId, time, task) {
     bot.sendMessage(chatId, `Напоминание! В ${time} - ${task}`);
 }
 
+// Функция для отправки предварительных напоминаний
+function sendPreReminders(chatId, plan) {
+    const now = new Date();
+    now.setHours(now.getHours() + 3); // ВРЕМЕННОЕ РЕШЕНИЕ ДЛЯ ЧАСОВОГО ПОЯСА
+
+    const [hours, minutes] = plan.time.split(':').map(Number);
+    const taskTime = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hours, minutes, 0);
+
+    const timeLeft = taskTime.getTime() - now.getTime();
+
+    if (timeLeft > 0) {
+        if (timeLeft <= 60 * 60 * 1000 && timeLeft > 30 * 60 * 1000) { // За час
+            bot.sendMessage(chatId, `Через час: ${plan.task} в ${plan.time}`);
+        } else if (timeLeft <= 30 * 60 * 1000 && timeLeft > 10 * 60 * 1000) { // За полчаса
+            bot.sendMessage(chatId, `Через полчаса: ${plan.task} в ${plan.time}`);
+        } else if (timeLeft <= 10 * 60 * 1000 && timeLeft > 0) { // За 10 минут
+            bot.sendMessage(chatId, `Через 10 минут: ${plan.task} в ${plan.time}`);
+        }
+    }
+}
+
 // Функция для проверки и отправки напоминаний
 function checkReminders() {
     const now = new Date();
-    console.log("Текущее время сервера:", now.toLocaleTimeString()); // <---  ДОБАВЛЕН ЛОГ
+    now.setHours(now.getHours() + 3); // ВРЕМЕННОЕ РЕШЕНИЕ ДЛЯ ЧАСОВОГО ПОЯСА
 
     const currentHour = String(now.getHours()).padStart(2, '0');
     const currentMinute = String(now.getMinutes()).padStart(2, '0');
@@ -43,10 +67,10 @@ function checkReminders() {
     for (const chatId in plans) {
         if (plans.hasOwnProperty(chatId)) {
             plans[chatId].forEach((plan) => {
-                console.log("Сравнение:", currentTime, plan.time, plan.task); // <---  ДОБАВЛЕН ЛОГ
                 if (plan.time === currentTime) {
                     sendReminder(chatId, plan.time, plan.task);
                 }
+                sendPreReminders(chatId, plan); // Отправляем предварительные напоминания
             });
         }
     }
@@ -56,29 +80,69 @@ function checkReminders() {
 setInterval(checkReminders, 60 * 1000); // 60000 миллисекунд = 1 минута
 
 // Обработчик команды /addplan
-bot.onText(/\/addplan (.+)/, (msg, match) => {
+bot.onText(/\/addplan/, (msg) => {
     const chatId = msg.chat.id;
-    const text = match[1]; // Текст после /addplan
+    userStates[chatId] = 'waiting_for_plan';
+    bot.sendMessage(chatId, 'Напишите ваш план в формате <время> <задача> (например, 10:00 Встреча)');
+});
 
-    // Разбираем текст на время и задачу
-    const parts = text.split(' ');
-    const time = parts[0];
-    const task = parts.slice(1).join(' ');
-
-    // Проверяем, что время указано в правильном формате (например, "10:00")
-    if (!/^\d{2}:\d{2}$/.test(time)) {
-        bot.sendMessage(chatId, 'Неверный формат времени. Используйте формат ЧЧ:ММ (например, 10:00).');
-        return;
+// Обработчик команды /deleteplan
+bot.onText(/\/deleteplan/, (msg) => {
+    const chatId = msg.chat.id;
+    if (plans[chatId] && plans[chatId].length > 0) {
+        let message = 'Ваши планы:\n';
+        plans[chatId].forEach((plan, index) => {
+            message += `${index + 1}. ${plan.time} - ${plan.task}\n`;
+        });
+        bot.sendMessage(chatId, message + '\nНапишите номер задачи, которую хотите удалить:');
+        userStates[chatId] = 'waiting_for_delete_number';
+    } else {
+        bot.sendMessage(chatId, 'У вас пока нет планов.');
     }
+});
 
-    if (!task) {
-        bot.sendMessage(chatId, 'Пожалуйста, укажите задачу.');
-        return;
+// Обработчик текстовых сообщений (для получения плана и номера для удаления)
+bot.on('message', (msg) => {
+    const chatId = msg.chat.id;
+    const text = msg.text;
+
+    if (userStates[chatId] === 'waiting_for_plan') {
+        // Разбираем текст на время и задачу
+        const parts = text.split(' ');
+        const time = parts[0];
+        const task = parts.slice(1).join(' ');
+
+        // Проверяем, что время указано в правильном формате (например, "10:00")
+        if (!/^\d{2}:\d{2}$/.test(time)) {
+            bot.sendMessage(chatId, 'Неверный формат времени. Используйте формат ЧЧ:ММ (например, 10:00).');
+            delete userStates[chatId];
+            return;
+        }
+
+        if (!task) {
+            bot.sendMessage(chatId, 'Пожалуйста, укажите задачу.');
+            delete userStates[chatId];
+            return;
+        }
+
+        addPlan(chatId, time, task);
+        bot.sendMessage(chatId, `План добавлен: ${time} - ${task}`);
+        delete userStates[chatId];
+
+    } else if (userStates[chatId] === 'waiting_for_delete_number') {
+        const index = parseInt(text) - 1; // Индекс плана (начинается с 1)
+
+        if (isNaN(index) || index < 0) {
+            bot.sendMessage(chatId, 'Неверный номер плана.');
+        } else {
+            if (deletePlan(chatId, index)) {
+                bot.sendMessage(chatId, 'План удален.');
+            } else {
+                bot.sendMessage(chatId, 'План с таким номером не найден.');
+            }
+        }
+        delete userStates[chatId];
     }
-
-    addPlan(chatId, time, task);
-
-    bot.sendMessage(chatId, `План добавлен: ${time} - ${task}`);
 });
 
 // Обработчик команды /listplans
@@ -95,43 +159,26 @@ bot.onText(/\/listplans/, (msg) => {
     }
 });
 
-// Обработчик команды /deleteplan
-bot.onText(/\/deleteplan (\d+)/, (msg, match) => {
-    const chatId = msg.chat.id;
-    const index = parseInt(match[1]) - 1; // Индекс плана (начинается с 1)
-
-    if (isNaN(index) || index < 0) {
-        bot.sendMessage(chatId, 'Неверный номер плана.');
-        return;
-    }
-
-    if (deletePlan(chatId, index)) {
-        bot.sendMessage(chatId, 'План удален.');
-    } else {
-        bot.sendMessage(chatId, 'План с таким номером не найден.');
-    }
-});
-
 // Обработчик команды /start
 bot.onText(/\/start/, (msg) => {
     const chatId = msg.chat.id;
     const helpText = `Привет! Я бот-напоминалка.\n\n` +
-                     `**Список команд:**\n` +
-                     `/start - Начать работу с ботом\n` +
-                     `/addplan <время> <задача> - Добавить новый план (например, /addplan 10:00 Встреча с клиентом)\n` +
-                     `/listplans - Показать список всех планов\n` +
-                     `/deleteplan <номер> - Удалить план по номеру из списка (например, /deleteplan 1)\n`;
-    bot.sendMessage(chatId, helpText, { parse_mode: 'Markdown' }); // Используем Markdown для форматирования
+        `**Список команд:**\n` +
+        `/start - Начать работу с ботом\n` +
+        `/addplan - Добавить новый план\n` +
+        `/listplans - Показать список всех планов\n` +
+        `/deleteplan - Удалить план\n`;
+    bot.sendMessage(chatId, helpText, { parse_mode: 'Markdown' });
 });
 
 // Обработчик команды /help (если хотите отдельную команду помощи)
 bot.onText(/\/help/, (msg) => {
     const chatId = msg.chat.id;
     const helpText = `**Список команд:**\n` +
-                     `/start - Начать работу с ботом\n` +
-                     `/addplan <время> <задача> - Добавить новый план (например, /addplan 10:00 Встреча с клиентом)\n` +
-                     `/listplans - Показать список всех планов\n` +
-                     `/deleteplan <номер> - Удалить план по номеру из списка (например, /deleteplan 1)\n`;
+        `/start - Начать работу с ботом\n` +
+        `/addplan - Добавить новый план\n` +
+        `/listplans - Показать список всех планов\n` +
+        `/deleteplan - Удалить план\n`;
     bot.sendMessage(chatId, helpText, { parse_mode: 'Markdown' });
 });
 
