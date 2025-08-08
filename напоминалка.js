@@ -12,6 +12,9 @@ const plans = {};
 // Объект для хранения состояний пользователей (какой запрос они ожидают)
 const userStates = {};
 
+// Объект для хранения информации об отправленных приветствиях и предварительных напоминаниях
+const sentReminders = {};
+
 // Функция для добавления плана
 function addPlan(chatId, time, task) {
     if (!plans[chatId]) {
@@ -45,12 +48,24 @@ function sendPreReminders(chatId, plan) {
     const timeLeft = taskTime.getTime() - now.getTime();
 
     if (timeLeft > 0) {
-        if (timeLeft <= 60 * 60 * 1000 && timeLeft > 30 * 60 * 1000) { // За час
+        const reminderKey = `${chatId}-${plan.time}-${plan.task}`; // Уникальный ключ для напоминания
+
+        if (!sentReminders[reminderKey]) {
+            sentReminders[reminderKey] = {};
+        }
+
+        // Исправленные условия: проверяем, что время еще не прошло и что напоминание еще не отправлено
+        if (timeLeft <= 60 * 60 * 1000 && timeLeft > 30 * 60 * 1000 && !sentReminders[reminderKey].hour) { // За час
             bot.sendMessage(chatId, `Через час: ${plan.task} в ${plan.time}`);
-        } else if (timeLeft <= 30 * 60 * 1000 && timeLeft > 10 * 60 * 1000) { // За полчаса
+            sentReminders[reminderKey].hour = true;
+        }
+        if (timeLeft <= 30 * 60 * 1000 && timeLeft > 10 * 60 * 1000 && !sentReminders[reminderKey].halfHour) { // За полчаса
             bot.sendMessage(chatId, `Через полчаса: ${plan.task} в ${plan.time}`);
-        } else if (timeLeft <= 10 * 60 * 1000 && timeLeft > 0) { // За 10 минут
+            sentReminders[reminderKey].halfHour = true;
+        }
+        if (timeLeft <= 10 * 60 * 1000 && timeLeft > 0 && !sentReminders[reminderKey].tenMinutes) { // За 10 минут
             bot.sendMessage(chatId, `Через 10 минут: ${plan.task} в ${plan.time}`);
+            sentReminders[reminderKey].tenMinutes = true;
         }
     }
 }
