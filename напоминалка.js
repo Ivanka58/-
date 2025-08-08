@@ -34,6 +34,8 @@ function sendReminder(chatId, time, task) {
 // Функция для проверки и отправки напоминаний
 function checkReminders() {
     const now = new Date();
+    console.log("Текущее время сервера:", now.toLocaleTimeString()); // <---  ДОБАВЛЕН ЛОГ
+
     const currentHour = String(now.getHours()).padStart(2, '0');
     const currentMinute = String(now.getMinutes()).padStart(2, '0');
     const currentTime = `${currentHour}:${currentMinute}`;
@@ -41,6 +43,7 @@ function checkReminders() {
     for (const chatId in plans) {
         if (plans.hasOwnProperty(chatId)) {
             plans[chatId].forEach((plan) => {
+                console.log("Сравнение:", currentTime, plan.time, plan.task); // <---  ДОБАВЛЕН ЛОГ
                 if (plan.time === currentTime) {
                     sendReminder(chatId, plan.time, plan.task);
                 }
@@ -74,12 +77,14 @@ bot.onText(/\/addplan (.+)/, (msg, match) => {
     }
 
     addPlan(chatId, time, task);
+
     bot.sendMessage(chatId, `План добавлен: ${time} - ${task}`);
 });
 
 // Обработчик команды /listplans
 bot.onText(/\/listplans/, (msg) => {
-    const chatId = msg.chat.id; if (plans[chatId] && plans[chatId].length > 0) {
+    const chatId = msg.chat.id;
+    if (plans[chatId] && plans[chatId].length > 0) {
         let message = 'Ваши планы:\n';
         plans[chatId].forEach((plan, index) => {
             message += `${index + 1}. ${plan.time} - ${plan.task}\n`;
