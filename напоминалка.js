@@ -15,6 +15,9 @@ const userStates = {};
 // Объект для хранения информации об отправленных приветствиях и предварительных напоминаниях
 const sentReminders = {};
 
+// ID пользователя, которому нужно отправлять сообщения "Я жив"
+const ownerId = 6749286679; // Замените на ваш User ID
+
 // Функция для добавления плана
 function addPlan(chatId, time, task) {
     if (!plans[chatId]) {
@@ -81,15 +84,28 @@ function checkReminders() {
 
     for (const chatId in plans) {
         if (plans.hasOwnProperty(chatId)) {
-            plans[chatId].forEach((plan) => {
+            // Используем цикл for, чтобы можно было удалять элементы во время итерации
+            for (let i = 0; i < plans[chatId].length; i++) {
+                const plan = plans[chatId][i];
                 if (plan.time === currentTime) {
                     sendReminder(chatId, plan.time, plan.task);
+                    // Удаляем задачу из списка после отправки напоминания
+                    plans[chatId].splice(i, 1);
+                    i--; // Уменьшаем индекс, чтобы не пропустить следующий элемент
+                } else {
+                    sendPreReminders(chatId, plan); // Отправляем предварительные напоминания
                 }
-                sendPreReminders(chatId, plan); // Отправляем предварительные напоминания
-            });
+            }
         }
     }
 }
+
+// Отправка сообщения "Я жив" каждые 30 минут
+function sendIAmAlive() {
+    bot.sendMessage(ownerId, 'Я жив!');
+}
+
+setInterval(sendIAmAlive, 10 * 60 * 1000); // 30 минут
 
 // Запускаем проверку напоминаний каждую минуту
 setInterval(checkReminders, 60 * 1000); // 60000 миллисекунд = 1 минута
